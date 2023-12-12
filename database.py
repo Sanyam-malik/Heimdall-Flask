@@ -60,14 +60,11 @@ def fetch_data(connection, query):
     cursor = connection.cursor()
     cursor.execute(query)
     result = cursor.fetchall()
-    columns = fetch_column_names(connection, extract_table_name(query), True)
-    final_result = []
-    for item in result:
-        object = {}
-        for index in range(0, len(item)):
-            column = columns[index]
-            object[column] = item[index]
-        final_result.append(object)
+
+    # Fetch column names directly from the cursor
+    columns = [column[0] for column in cursor.description]
+
+    final_result = [dict(zip(columns, item)) for item in result]
     return final_result
 
 

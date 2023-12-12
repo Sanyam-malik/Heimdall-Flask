@@ -72,15 +72,14 @@ def get_applications():
     return jsonify({'applications': items})
 
 
+@app.route('/api/tags/<tag_filter>', methods=['GET'])
+def get_tags_filter(tag_filter=None):
+    return generate_tags(tag_filter)
+
+
 @app.route('/api/tags', methods=['GET'])
 def get_tags():
-    conn = database.create_connection()
-
-    # Fetch data
-    item_association = database.fetch_data(conn, "SELECT * FROM 'item_tag' order by item_id")
-    tags = database.fetch_data(conn, "SELECT * FROM 'items' where user_id=2 and type=1 order by title")
-    database.close_connection(conn)
-    return jsonify({'tags_association': item_association, 'tags': tags})
+    return generate_tags()
 
 
 @app.route('/api/users', methods=['GET'])
@@ -103,6 +102,35 @@ def is_image(filename):
         return False
 
 
+def generate_tags(tag_filter=None):
+    conn = database.create_connection()
+    filter_str = ""
+    # Extract path variable
+    if tag_filter:
+        filter_str = "and `title` LIKE '%" + str(tag_filter).lower() + "%'"
+    # Fetch data
+    items = database.fetch_data(conn,
+                                "SELECT * FROM 'items' i WHERE i.`user_id`=2 AND i.`type`=0 ORDER BY i.`order` ASC")
+    for item in items:
+        item['icon'] = create_absolute_path(item['icon']) if item['icon'] else None
+
+    items = convert_list_to_dict(items, "id")
+    item_association = convert_list_to_map(database.fetch_data(conn, "SELECT * FROM 'item_tag' ORDER BY item_id"),
+                                           "tag_id")
+    tags = database.fetch_data(conn, f"SELECT * FROM 'items' WHERE `type`=1 {filter_str} ORDER BY `title`")
+    for tag in tags:
+        tag['title'] = create_text_using_translation_key(tag['title'])
+        item_list = [items[item['item_id']] for item in item_association.get(tag['id'], []) if
+                     item['item_id'] in items] if item_association.get(tag['id']) else []
+        if str(tag['title']).lower() == "dashboard":
+            other_tags = database.fetch_data(conn, f"SELECT * FROM 'items' WHERE `type`=1 and id !=0 ORDER BY `order`")
+            for other_tag in other_tags:
+                item_list.append(other_tag)
+        tag['items'] = sorted(item_list, key=lambda x: x['order'])
+    database.close_connection(conn)
+    return jsonify({'tags': tags})
+
+
 def image_to_base64(image_path):
     with open(image_path, "rb") as image_file:
         # Encode the image file content to Base64
@@ -118,6 +146,22 @@ def create_text_using_translation_key(trans_key):
     return str(trans_key.rsplit('.', 1)[-1]).replace("_", " ").title()
 
 
+# Function to convert list of objects to map of lists based on a key
+def convert_list_to_map(list_of_objects, key):
+    result_map = {}
+    for obj in list_of_objects:
+        key_value = obj[key]
+        if key_value not in result_map:
+            result_map[key_value] = []
+        result_map[key_value].append(obj)
+    return result_map
+
+
+# Function to convert list of dictionaries to dictionary of dictionaries based on a key
+def convert_list_to_dict(list_of_dicts, key):
+    return {obj[key]: obj for obj in list_of_dicts}
+
+
 if __name__ == '__main__':
     # app.run(debug=True, port=port)
-    serve(app, host="0.0.0.0", port=port)
+    serve(app, host="0.0.0.0", port=port, threads=100)
